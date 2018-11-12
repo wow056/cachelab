@@ -6,31 +6,59 @@
 #include <stdlib.h>
 #include <getopt.h>
 
-int parse_block_offset(int address);
-int parse_tag(int address);
-int parse_set_index(int address);
+typedef struct {
+    int valid;
+    int tag;
+} line;
 
-int parse_argument(int argc, char *argv[], int *vflag, int *set_num, int *lines_per_set, int *block_bit, FILE **tracefile);
+typedef struct {
+    line* lines;
+} set;
+
+typedef struct {
+    int set_num;
+    int line_num;
+    int block_bytes;
+    set* sets;
+} cache;
+
+int parse_block_offset(long address, int b);
+int parse_set_index(long address, int s, int b);
+int parse_tag(long address, int s, int b);
+
+int parse_argument(int argc, char *argv[], int *vflag, int *set_bit, int *lines_per_set, int *block_bit, FILE **tracefile);
 int parse_memory_trace(const char *str, long *address, int *size);
 
 int main(int argc, char *argv[])
 {
-    int verbose_flag, set_num, line_num, block_bit_num;
+    int verbose_flag, set_bit, line_num, block_bit_num;
+    int set_num,block_num;
     int memsize;
     long address;
     FILE *f;
     char buffer[100];
+    int block_offset, set_index, tag;
 
-    parse_argument(&argc, argv, &verbose_flag, &set_num, &line_num, &block_bit_num, &f);
-    printf("v:%d, s:%d, E:%d, b:%d\n",verbose_flag, set_num, line_num, block_bit_num);
-    while(fgets(buffer, 100, f))
+    if(parse_argument(argc, argv, &verbose_flag, &set_bit, &line_num, &block_bit_num, &f))
     {
-        parse_memory_trace(buffer, &address, &memsize);
-        printf("%s",buffer);
-        printf("address: 0x%lx, memsize: %d\n", address, memsize);
+        set_num = 1 << set_bit;
+        block_num = 1 << block_bit_num;
+        printf("v:%d, s:%d, E:%d, b:%d\n",verbose_flag, set_num, line_num, block_num);
+        while(fgets(buffer, 100, f))
+        {
+            if(parse_memory_trace(buffer, &address, &memsize))
+            {
+                printf("%s",buffer);
+                printf("address: 0x%lx, memsize: %d\n", address, memsize);
+                tag = parse_tag(address, set_bit, block_bit_num);
+                set_index = parse_set_index(address, set_bit, block_bit_num);
+                block_offset = parse_block_offset(address, set_bit);
+                printf("tag: 0x%x, set_index: 0x%x, block_offset: 0x%x\n\n", tag, set_index, block_offset);
+            }
+        }
+        printSummary(0, 0, 0);
+        return 0;
     }
-    printSummary(0, 0, 0);
-    return 0;
     else
     {
         return -1;
@@ -39,25 +67,24 @@ int main(int argc, char *argv[])
 
 int parse_memory_trace(const char *str,long *address, int *size)
 {
-    char operation;
     int size_temp;
     long address_temp;
-    sscanf(str,"%*[ \n\t]%c%lx,%d",&operation,&address_temp, &size_temp);
-    if(operation == 'I')
+    if(str[0] == 'I')
     {
         return 0;
     }
     else
     {
+        sscanf(str,"%*s%lx,%d",&address_temp, &size_temp);
         *address = address_temp;
         *size = size_temp;
         return 1;
     }
 }
 
-int parse_argument(int argc, char *argv[], int *vflag, int *set_num, int *lines_per_set, int *block_bit, FILE **tracefile)
+int parse_argument(int argc, char *argv[], int *vflag, int *set_bit, int *lines_per_set, int *block_bit, FILE **tracefile)
 {
-    int vflag_temp=0, s_temp=0, e_temp=0, b_temp=0, tflag_temp=0;
+    int vflag_temp=0, s_temp=0, e_temp=0, b_temp=0;
     int opt;
     FILE *file_temp = NULL;
     while ((opt = getopt(argc, argv, "hvs:E:b:t:")) != -1)
@@ -90,10 +117,10 @@ int parse_argument(int argc, char *argv[], int *vflag, int *set_num, int *lines_
                 break;
         }
     }
-    if(tflag_temp && s_temp && e_temp && b_temp && file_temp)
+    if(s_temp && e_temp && b_temp && file_temp)
     {
         *vflag = vflag_temp;
-        *set_index_bit = 1 << (s_temp-1);
+        *set_bit = s_temp;
         *lines_per_set = e_temp;
         *block_bit = b_temp;
         *tracefile = file_temp;
@@ -104,3 +131,21 @@ int parse_argument(int argc, char *argv[], int *vflag, int *set_num, int *lines_
         return 0;
     }
 }
+
+int parse_block_offset(long address, int b)
+{
+    return address & ((0x1 << b) - 1); 
+}
+
+int parse_set_index(long address, int s, int b)
+{
+    address >>= b;
+    return address & ((0x1 << s) - 1);
+}
+int parse_tag(long address, int s, int b)
+{
+    unsigned long temp = address; 
+    return (int)((unsigned long)temp >> (s + b));
+}
+
+
