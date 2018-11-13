@@ -19,28 +19,31 @@ int is_transpose(int M, int N, int A[N][M], int B[M][N]);
  *     searches for that string to identify the transpose function to
  *     be graded. 
  */
-char transpose1_desc[] = "Transpose1";
-void transpose1_(int M, int N, int A[N][M], int B[M][N])
-{
-    
 
-
-    
-}
 char transpose_submit_desc[] = "Transpose submission";
 void transpose_submit(int M, int N, int A[N][M], int B[M][N])
 {
     int i, j, block_row, block_col;
     int block_size = 8;
+    if(M == 64)
+    {
+        block_size = 4;
+    }
+    else if(M == 32)
+    {
+        block_size = 8;
+    }
+    else
+    {
+        block_size = 16;
+    }
     //if transeposed matrix's whole column is accessed, previous cached rows are uncached
     //so we devide transposed matrix by blocks
     for(block_row = 0; block_row< N + block_size ; block_row += block_size)
         for(block_col = 0; block_col < M + block_size; block_col += block_size)
             for(i = block_row; (i < (block_row + block_size)) && i < N; i++)
                 for(j = block_col; (j <(block_col + block_size)) && j < M; j++)
-                {
                     B[j][i] = A[i][j];
-                }
 }
 
 
@@ -79,7 +82,7 @@ void registerFunctions()
     registerTransFunction(transpose_submit, transpose_submit_desc); 
 
     /* Register any additional transpose functions */
-    registerTransFunction(trans, trans_desc); 
+//    registerTransFunction(transpose1, transpose1_desc);
 
 }
 
