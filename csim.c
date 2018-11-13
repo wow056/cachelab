@@ -40,39 +40,27 @@ int parse_memory_trace(const char *str,char *instruction, unsigned long *address
 
 int match_line_address(line l, unsigned long address);
 void fetch(cache* c, set* current_set, unsigned long address);
+void cache_find_iteration(cache *c, char* str, int verbose_flag);
 
 int main(int argc, char *argv[])
 {
     int verbose_flag, line_num;
     int set_num,block_num;
-    char instruction;
-    int memsize;
-    unsigned long address;
     FILE *f;
     char buffer[100];
-    int block_offset, set_index, tag;
     cache *c;
 
     if(parse_argument(argc, argv, &verbose_flag, &s, &line_num, &b, &f))
     {
         set_num = 1 << s;
         block_num = 1 << b;
-        printf("v:%d, s:%d, E:%d, b:%d\n",verbose_flag, set_num, line_num, block_num);
+        //printf("v:%d, s:%d, E:%d, b:%d\n",verbose_flag, set_num, line_num, block_num);
         c = allocate_cache(set_num, line_num, block_num);
         while(fgets(buffer, 100, f))
         {
-            if(parse_memory_trace(buffer, &instruction, &address, &memsize))
-            {
-                //printf("%s",buffer);
-                //printf("instruction: %c, address: 0x%lx, memsize: %d\n",instruction, address, memsize);
-                cache_find_iteration(c, instruction, address);
-                //tag = parse_tag(address);
-                //set_index = parse_set_index(address);
-                //block_offset = parse_block_offset(address);
-                //printf("tag: 0x%x, set_index: 0x%x, block_offset: 0x%x\n\n", tag, set_index, block_offset);
-            }
+            cache_find_iteration(c, buffer, verbose_flag);
         }
-        printSummary(0, 0, 0);
+        printSummary(hit_count, miss_count, eviction_count);
         deallocate_cache(c);
         return 0;
     }
@@ -179,12 +167,12 @@ int parse_set_index(unsigned long address)
     address >>= b;
     return address & ((0x1 << s) - 1);
 }
+
 int parse_tag(unsigned long address)
 {
     unsigned long temp = address; 
     return (int)((unsigned long)temp >> (s + b));
 }
-
 
 cache* allocate_cache(int set_num, int line_num, int block_bytes)
 {
@@ -224,69 +212,123 @@ int match_line_address(line l, unsigned long address)
     return (parse_tag(address) == l.tag) && l.valid; 
 }
 
-void cache_find_iteration(cache *c, char instruction, unsigned long address)
+void cache_find_iteration(cache *c, char* str, int verbose_flag)
 {
     int i;
     set* current_set;
     unsigned long min_timing_val;
     int oldest_index;
     int is_miss= 0, is_hit = 0, is_eviction;
-    current_set = &(c->sets[parse_set_index(address)]);
-    for(i=0; i<c->line_num;i++)
-    {
-        if(match_line_address(current_set->lines[i], address))
-        {
-            //hit
-            current_set->lines[i].used_timing = c->instruction_count;
-            is_hit = 1;
-            break;
-        }
-    }
-    
-    //if no match
-    if(i == c->line_num)
-    {
-        //find empty string
-        for(i = 0;i<c->line_num; i++)
-        {
+    unsigned long address;
+    char instruction;
+    int size;
 
-        }
-        min_timing_val = c->instruction_count;
-        //find LRU
+    //find match
+
+    if(parse_memory_trace(str,&instruction, &address, &size))
+    {
+        current_set = &(c->sets[parse_set_index(address)]);
         for(i=0; i<c->line_num;i++)
         {
-            if(current_set->lines[i].used_timing < min_timing_val)
+            if(match_line_address(current_set->lines[i], address))
             {
-                min_timing_val = current_set->lines[i].used_timing;
-                oldest_index = i;
+                //hit
+                current_set->lines[i].used_timing = c->instruction_count;
+                is_hit = 1;
+                break;
             }
         }
-        if(i == c->line_num)
+
+        //if no match
+        if(!is_hit)
         {
-            fetch(c, current_set, address);
-            for(i=0; i < c->line_num; i++)
+            //find empty line
+            for(i = 0;i<c->line_num; i++)
             {
                 if(!current_set->lines[i].valid)
                 {
                     current_set->lines[i].tag = parse_tag(address);
-                    printf("hit"); 
+                    current_set->lines[i].used_timing = c->instruction_count;
+                    current_set->lines[i].valid = 1;
+                    is_miss = 1;
                     break;
                 }
             }
         }
-    }
-    if(is_hit)
-    {
 
-    }
-    else if(is_miss)
-    {
+        //if line is full
+        if(!(is_miss | is_hit))
+        {
+            //find LRU
+            min_timing_val = c->instruction_count;
+            for(i=0; i<c->line_num;i++)
+            {
+                if(current_set->lines[i].used_timing < min_timing_val)
+                {
+                    min_timing_val = current_set->lines[i].used_timing;
+                    oldest_index = i;
+                }
+            }
+            current_set->lines[oldest_index].tag = parse_tag(address);
+            current_set->lines[oldest_index].used_timing = c->instruction_count;
+            is_eviction = 1;
+        }
 
+        if(verbose_flag)
+        {
+            printf("%c %lx, %d ", instruction, address, size);
+        }
+        //increse count and print
+        if(is_hit)
+        {
+            if(instruction == 'M')
+            {
+                if(verbose_flag)
+                    printf("hit hit\n");
+                hit_count += 2;
+            }
+            else
+            {
+                if(verbose_flag)
+                    printf("hit\n");
+                hit_count +=1;
+            }
+        }
+        if(is_miss)
+        {
+            if(instruction == 'M')
+            {
+                if(verbose_flag)
+                    printf("miss hit\n");
+                miss_count+=1;
+                hit_count+=1;
+            }
+            else
+            {
+                if(verbose_flag)
+                    printf("miss\n");
+                miss_count+=1;
+            }
+        }
+        if(is_eviction)
+        {
+            if(instruction == 'M')
+            {
+                if(verbose_flag)
+                    printf("miss eviction hit\n");
+                miss_count += 1;
+                eviction_count += 1;
+                hit_count += 1;
+            }
+            else
+            {
+                if(verbose_flag)
+                    printf("miss eviction\n");
+                miss_count += 1;
+                eviction_count+= 1;
+            }
+        }
+        c->instruction_count++;
     }
-    else if(is_eviction)
-    {
-
-    }
-    c->instruction_count++;
 }
 
